@@ -10,23 +10,18 @@
 
 package jp.co.teng.android.moguratataki;
 
-import java.util.Timer;
-import java.util.TimerTask;
 
 import android.app.Activity;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PorterDuff.Mode;
 import android.graphics.Rect;
-import android.os.CountDownTimer;
-import android.os.Looper;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceHolder.Callback;
 import android.view.SurfaceView;
-import android.widget.SlidingDrawer;
 
 public class GameView extends SurfaceView implements
 Callback, Runnable{
@@ -68,7 +63,6 @@ Callback, Runnable{
 
 	private SurfaceHolder   holder;
 	private Thread thread;
-	private Timer timer = new Timer();
 
 	public GameView(Activity activity) {
 		super(activity);
@@ -128,8 +122,6 @@ Callback, Runnable{
 				repaint();
 				//もぐらポップアップ処理
 				popMogura();
-				//TODO:タイムアップのタイミングをどこで拾うか検討中
-				status = StatusTimeup;
 				break;
 			case StatusTimeup:
 				//プレイ終了処理(終了時のみ)
@@ -231,14 +223,14 @@ Callback, Runnable{
 	}
 
 	/**
-	 * PLAY開始処理
+	 * Clock開始処理（カウントダウンクロック・プレイクロックを連続して呼び出す）
 	 */
-	private void startCountDown(){
+	private void startClock(){
 		//TODO startCountDownメソッド実装
 
 		//TODO タイマー処理詳細化
 		// 3秒カウントダウンする
-		new CountDownTimer(3000,1000){
+		new GameTimer(3000,1000){
 			//            TextView count_txt = (TextView)findViewById(R.id.textView1);
 			// カウントダウン処理
 			public void onTick(long millisUntilFinished){
@@ -246,7 +238,7 @@ Callback, Runnable{
 				try{
 					synchronized (holder) {
 						canvas = holder.lockCanvas();
-						paintMessage(canvas, Long.toString(millisUntilFinished/1000));
+						paintMessage(canvas, Long.toString(Math.round((double)millisUntilFinished/1000)));
 //						paintMessage(canvas, "ZZZZZZZZZZZZZZZZZZZ");
 					}
 				}catch(Exception e){
@@ -259,11 +251,47 @@ Callback, Runnable{
 			}
 			// カウントが0になった時の処理
 			public void onFinish(){
+				startPlayClock();
 				status = StatusPlaying;
 				outputLog(LogD,"status change:" + status);
 			}
 		}.start();
 
+	}
+
+	/**
+	 * PlayClock開始処理
+	 */
+	private void startPlayClock(){
+		//TODO startCountDownメソッド実装
+
+		//TODO タイマー処理詳細化
+		// 3秒カウントダウンする
+		new GameTimer(5000,1000){
+			//            TextView count_txt = (TextView)findViewById(R.id.textView1);
+			// カウントダウン処理
+			public void onTick(long millisUntilFinished){
+				Canvas canvas = null;
+				try{
+					synchronized (holder) {
+						canvas = holder.lockCanvas();
+						paintMessage(canvas, Long.toString(Math.round((double)millisUntilFinished/1000)));
+					}
+				}catch(Exception e){
+					outputLog(LogE, "message:", e);
+				}finally{
+					if (canvas != null) {
+						holder.unlockCanvasAndPost(canvas);
+					}
+				}
+			}
+			// カウントが0になった時の処理
+			public void onFinish(){
+
+				status = StatusTimeup;
+				outputLog(LogD,"status change:" + status);
+			}
+		}.start();
 	}
 
 	/**
@@ -273,18 +301,18 @@ Callback, Runnable{
 		//TODO exitPlayingメソッド実装
 		//結果表示処理
 
-		//TODO テストコード
-		try {
-			Thread.sleep(3000);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
+		status = StatusDisplayResult;
+		outputLog(LogD,"status change:" + status);
+	}
+
+	/**
+	 * 結果・選択画面表示処理
+	 */
+	private void displayResult(){
+		//TODO displayResultメソッド実装
+		//結果表示処理
 
 		//TODO テストコード
-		if (!surfaceCreated) {
-			return;
-		}
-
 		Canvas canvas = null;
 		try{
 			synchronized (holder) {
@@ -298,17 +326,6 @@ Callback, Runnable{
 				holder.unlockCanvasAndPost(canvas);
 			}
 		}
-
-		status = StatusDisplayResult;
-		outputLog(LogD,"status change:" + status);
-	}
-
-	/**
-	 * 結果・選択画面表示処理
-	 */
-	private void displayResult(){
-		//TODO displayResultメソッド実装
-		//結果表示処理
 
 		status = StatusSelecting;
 		outputLog(LogD,"status change:" + status);
@@ -327,31 +344,6 @@ Callback, Runnable{
 	 */
 	private void popMogura(){
 		//TODO popMoguraメソッド実装
-
-		//TODO テストコード
-		if (!surfaceCreated) {
-			return;
-		}
-		Canvas canvas = null;
-		try{
-			synchronized (holder) {
-				canvas = holder.lockCanvas();
-				paintMessage(canvas,MSG_PLAYING);
-			}
-		}catch(Exception e){
-			outputLog(LogE, "message:", e);
-		}finally{
-			if (canvas != null) {
-				holder.unlockCanvasAndPost(canvas);
-			}
-		}
-		//TODO テストコード
-		try {
-			Thread.sleep(3000);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
-
 	}
 
 	/**
@@ -444,7 +436,7 @@ Callback, Runnable{
 		if(status == StatusReady){
 			status = StatusStarting;
 			outputLog(LogD,"status change:" + status);
-			startCountDown();
+			startClock();
 		}else if(status == StatusSelecting){
 			//TODO 終了後の時の入力制御処理
 			status = StatusPrepare;
