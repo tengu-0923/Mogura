@@ -1,17 +1,28 @@
-//TODO いったん、中断・再開のことは考えずにやる。動くようになってから考える
-
 //済 文字表示・スリープを一時的に組み込み
 //済 待ち処理・カウントダウン
-//TODO タイマー処理
- //→タイマー処理がUIスレッドからしか実行できない？？？要確認
-//TODO 画面表示・リソース開放
-//TODO 画面調整・画面表示のブラッシュアップ
-
+//済 タイマー処理
+//→タイマー処理がUIスレッドからしか実行できない？？？要確認
+//済 背景画像表示
+//済 メッセージ表示箇所の調整・クリア処理
+//→対象を指定したCanvasのクリア方法を明らかに ダブルバッファリングが鍵
+//済 画面調整・画面表示のブラッシュアップ
+//→背景は常に表示・もぐらは毎回再描画 SurfaceViewの仕様上、毎回再描画が必要
+//TODO もぐら表示の実装
+//TODO もぐらタッチの実装
+//TODO １）タッチイベントを拾って、得点を内部に保存
+//TODO ２）得点の表示・更新
+//TODO ３）叩かれたもぐらの色変更・消えるタイミング変更
+//TODO 結果画面表示 簡単でOK？
+//TODO リソース開放
+//TODO 連続プレイ時も問題がないか確認
+//TODO 中断・再開が可能なよう実装
 
 package jp.co.teng.android.moguratataki;
 
 
+import jp.co.teng.android.moguratataki.DataLoader;
 import android.app.Activity;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PorterDuff.Mode;
@@ -47,19 +58,40 @@ Callback, Runnable{
 	private final int StatusError         = 999;
 
 	private final String MSG_START_WAITING      = "画面をタップで開始";
-	private final String MSG_START_COUNTDOWN    = "開始します";
-	private final String MSG_PLAYING            = "起動中";
-	private final String MSG_TIMEUP            = "終了です";
+	private final String MSG_START_COUNTDOWN    = "開始まで：";
+	private final String MSG_PLAYING            = "終了まで：";
+	private final String MSG_TIMEUP            = "終了です。画面タップでもう一度";
 
 	private final int LogD         = 1;
 	private final int LogI         = 2;
 	private final int LogW         = 3;
 	private final int LogE         = 4;
 
+	private final int sukima = 5;
+	private final int rows  = 4;
+	private final int cols  = 4;
+	private final Long mogLifespan = (long)2000;
+
 	private   Paint           textPaint;
 	private   int             textSize;
+	private   Paint           bgPaint;
+
+	protected Bitmap imageBase;
+	protected Bitmap imageMogura;
+	private   DataLoader      loader;
+
+	private   int             xOff;         // 駒表示時のXのオフセット
+	private   int             yOff;         // 駒表示時のYのオフセット
+	private   int             pWidth;       // 駒の幅
+	private   int             pHeight;      // 駒の高さ
+	private   float           scale;        // 座標計算用スケール
+
+	private Mogura[] moguras;
 
 	private final String APP_NAME         = "Moguratataki";
+
+	private int atPlayStart;
+	private int atPlayEnd;
 
 	private SurfaceHolder   holder;
 	private Thread thread;
@@ -82,6 +114,8 @@ Callback, Runnable{
 
 		surfaceCreated = false;
 		thread         = null;
+
+		loader         = new DataLoader(this);
 
 		//		initializing = true;
 		status = StatusInit;
@@ -114,8 +148,9 @@ Callback, Runnable{
 				break;
 			case StatusStarting:
 				//開始処理ブロック
-				//TODO ここでカウントダウン処理のトリガを引く。UIスレッドからじゃないとうまくいかない。。
-//				startCountDown();
+				//TODO ここでカウントダウン処理のトリガを引く。→UIスレッドからじゃないとうまくいかない。。
+				//				startCountDown();
+				//				repaint();
 				break;
 			case StatusPlaying:
 				//再描画処理
@@ -153,9 +188,18 @@ Callback, Runnable{
 	 * ゲーム開始準備処理
 	 */
 	private void prepareGame(){
+		if(!surfaceCreated){
+			return;
+		}
+
 		//TODO prepareGameメソッド実装
+		loader.loadImages(getContext());
 		initGameParam();
-		loadImages();
+
+		moguras = new Mogura[rows*cols];
+		for (int i=0;i<rows*cols ;i++){
+			moguras[i] = new Mogura();
+		}
 
 		status = StatusPrepare;
 		outputLog(LogD,"status change:" + status);
@@ -166,20 +210,37 @@ Callback, Runnable{
 	 */
 	private void initGameParam(){
 		//TODO initGameParamメソッド実装 画面サイズを取得して画像パラメータの最適化 など
-		textSize  = 32;
+		textSize  = 28;
 		textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 		textPaint.setStyle(Paint.Style.FILL);
 		textPaint.setARGB(0xff,0xff,0xff,0xff);
 		textPaint.setTextSize(textSize);
 
+		bgPaint = new Paint();
+		bgPaint.setStyle(Paint.Style.FILL);
+		bgPaint.setARGB(0xff,0,0,0); //背景色
 
-	}
+		//描画時の座標計算のための倍率、画面の横幅から決める
+		if (getWidth() < 320) { // QVGA
+			scale = 0.5F;
+		} else if (getWidth() >= 320 && getWidth() < 480) { // HVGA
+			scale = 0.67F;
+		} else if (getWidth() >= 480 && getWidth() < 640) { // WVGA
+			scale = 1.0F;
+		} else if (getWidth() >= 640) {
+			scale = (float)getWidth() / 480;
+		}
 
-	/**
-	 * 画像初期読み込み処理
-	 */
-	private void loadImages(){
-		//TODO loadImagesメソッド実装
+		// X方向にセンタリングする為のオフセット
+		xOff = ((getWidth() - imageBase.getWidth() * cols) / 2)
+				- ((cols - 1) * sukima) ;
+
+		// Y方向にセンタリングする為のオフセット
+		yOff = ((getHeight() - imageBase.getHeight() * rows) / 2)
+				- ((rows - 1) * sukima) ;
+
+		pWidth  = imageBase.getWidth();
+		pHeight = imageBase.getHeight();
 
 	}
 
@@ -228,26 +289,15 @@ Callback, Runnable{
 	private void startClock(){
 		//TODO startCountDownメソッド実装
 
+		atPlayStart = 0;
 		//TODO タイマー処理詳細化
 		// 3秒カウントダウンする
 		new GameTimer(3000,1000){
 			//            TextView count_txt = (TextView)findViewById(R.id.textView1);
 			// カウントダウン処理
 			public void onTick(long millisUntilFinished){
-				Canvas canvas = null;
-				try{
-					synchronized (holder) {
-						canvas = holder.lockCanvas();
-						paintMessage(canvas, Long.toString(Math.round((double)millisUntilFinished/1000)));
-//						paintMessage(canvas, "ZZZZZZZZZZZZZZZZZZZ");
-					}
-				}catch(Exception e){
-					outputLog(LogE, "message:", e);
-				}finally{
-					if (canvas != null) {
-						holder.unlockCanvasAndPost(canvas);
-					}
-				}
+				atPlayStart = (int)Math.round((double)millisUntilFinished/1000);
+				repaint();
 			}
 			// カウントが0になった時の処理
 			public void onFinish(){
@@ -263,27 +313,28 @@ Callback, Runnable{
 	 * PlayClock開始処理
 	 */
 	private void startPlayClock(){
-		//TODO startCountDownメソッド実装
+		//TODO startPlayClockメソッド実装
+		Canvas canvas = null;
+		try{
+			synchronized (holder) {
+				canvas = holder.lockCanvas();
+				paintCells(canvas);
+			}
+		}catch(Exception e){
+			outputLog(LogE, "message:", e);
+		}finally{
+			if (canvas != null) {
+				holder.unlockCanvasAndPost(canvas);
+			}
+		}
 
+		atPlayEnd = 0;
 		//TODO タイマー処理詳細化
-		// 3秒カウントダウンする
 		new GameTimer(5000,1000){
 			//            TextView count_txt = (TextView)findViewById(R.id.textView1);
 			// カウントダウン処理
 			public void onTick(long millisUntilFinished){
-				Canvas canvas = null;
-				try{
-					synchronized (holder) {
-						canvas = holder.lockCanvas();
-						paintMessage(canvas, Long.toString(Math.round((double)millisUntilFinished/1000)));
-					}
-				}catch(Exception e){
-					outputLog(LogE, "message:", e);
-				}finally{
-					if (canvas != null) {
-						holder.unlockCanvasAndPost(canvas);
-					}
-				}
+				atPlayEnd = (int)Math.round((double)millisUntilFinished/1000);
 			}
 			// カウントが0になった時の処理
 			public void onFinish(){
@@ -336,7 +387,63 @@ Callback, Runnable{
 	 */
 	private void repaint(){
 		//TODO repaintメソッド実装
+		Canvas canvas = null;
+		if(status == StatusStarting){
+			if(atPlayStart == 0){
+				return;
+			}
+			try{
+				synchronized (holder) {
+					canvas = holder.lockCanvas();
+					paintCells(canvas);
+					paintMessage(canvas, MSG_START_COUNTDOWN + atPlayStart);
+				}
+			}catch(Exception e){
+				outputLog(LogE, "message:", e);
+			}finally{
+				if (canvas != null) {
+					holder.unlockCanvasAndPost(canvas);
+				}
+			}
+		}else if(status == StatusPlaying){
+			if(atPlayEnd == 0){
+				return;
+			}
+			try{
+				synchronized (holder) {
+					canvas = holder.lockCanvas();
+					paintCells(canvas);
+					paintMessage(canvas, MSG_PLAYING + atPlayEnd);
+				}
+			}catch(Exception e){
+				outputLog(LogE, "message:", e);
+			}finally{
+				if (canvas != null) {
+					holder.unlockCanvasAndPost(canvas);
+				}
+			}
+		}
+	}
 
+	/**
+	 * セルの表示
+	 * @param canvas 描画時に使われるCanvas
+	 * @param drawNumber 数字の駒も描く
+	 */
+	private void paintCells(Canvas canvas) {
+		//TODO セルの表示※出来れば背景（一度だけ表示）にしたい
+		//TODO あるいは、ここで初回以外はもぐら表示も行うか？
+		int n;
+
+		n  = 0;
+		for (int y=0; y < rows; y++) {
+			for (int x=0; x < cols; x++) {
+				int   xx = x * pWidth + x * sukima + xOff;
+				int   yy = y * pHeight + y * sukima + yOff;
+				canvas.drawBitmap(imageBase,xx,yy,null);
+				n++;
+			}
+		}
 	}
 
 	/**
@@ -358,10 +465,10 @@ Callback, Runnable{
 		Rect   bounds = new Rect();
 		textPaint.getTextBounds(str,0,str.length(),bounds);
 		xx = (getWidth() - bounds.width()) / 2;
-		yy = (getHeight() - textSize) / 2;
-		canvas.drawColor(0,Mode.CLEAR);
+		//		yy = (getHeight() - textSize) / 2;
+		yy = textSize;
+		canvas.drawRect(0, 0, getWidth(), textSize + 5, bgPaint);
 		canvas.drawText(str,xx,yy,textPaint);
-
 	}
 
 	/**
@@ -416,33 +523,32 @@ Callback, Runnable{
 
 	}
 
-	@Override
-	public boolean onKeyDown(int keyCode,KeyEvent event) {
-		//TODO 開始待ちの時の入力制御処理
-		if(status == StatusReady){
-			status = StatusStarting;
-			outputLog(LogD,"status change:" + status);
-		}else if(status == StatusSelecting){
-			//TODO 終了後の時の入力制御処理
-			status = StatusPrepare;
-			outputLog(LogD,"status change:" + status);
-		}
-		return super.onKeyDown(keyCode,event);
-	}
+	//	@Override
+	//	public boolean onKeyDown(int keyCode,KeyEvent event) {
+	//		if(status == StatusReady){
+	//			status = StatusStarting;
+	//			outputLog(LogD,"status change:" + status);
+	//			return super.onKeyDown(keyCode,event);
+	//		}else if(status == StatusSelecting){
+	//			status = StatusPrepare;
+	//			outputLog(LogD,"status change:" + status);
+	//			return super.onKeyDown(keyCode,event);
+	//		}
+	//		return true;
+	//	}
 
 	@Override
 	public boolean onTouchEvent(MotionEvent event) {
-		//TODO 開始待ちの時の入力制御処理
 		if(status == StatusReady){
 			status = StatusStarting;
 			outputLog(LogD,"status change:" + status);
 			startClock();
+			return super.onTouchEvent(event);
 		}else if(status == StatusSelecting){
-			//TODO 終了後の時の入力制御処理
 			status = StatusPrepare;
 			outputLog(LogD,"status change:" + status);
+			return super.onTouchEvent(event);
 		}
 		return true;
-
 	}
 }
