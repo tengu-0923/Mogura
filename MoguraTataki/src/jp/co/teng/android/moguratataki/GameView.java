@@ -7,21 +7,19 @@
 //→対象を指定したCanvasのクリア方法を明らかに ダブルバッファリングが鍵
 //済 画面調整・画面表示のブラッシュアップ
 //→背景は常に表示・もぐらは毎回再描画 SurfaceViewの仕様上、毎回再描画が必要
-//TODO もぐら表示の実装　もぐら側に表示内容を返すメソッドを持たせる
-//TODO もぐらタッチの実装
-//TODO １）タッチイベントを拾って、得点を内部に保存
-//TODO ２）得点の表示・更新
-//TODO ３）叩かれたもぐらの色変更・消えるタイミング変更
-//TODO 結果画面表示 簡単でOK？
+//済 もぐら表示の実装　もぐら側に表示内容を返すメソッドを持たせる
+//◆もぐらタッチの実装
+//済 １）タッチイベントを拾って、得点を内部に保存
+//済 ２）得点の表示・更新
+//済 ３）叩かれたもぐらの色変更・消えるタイミング変更
+//  結果画面表示 簡単でOK？
+//済 連続プレイ時も問題がないか確認
+//→preparePlayに各種リフレッシュ処理を追加
 //TODO リソース開放
-//TODO 連続プレイ時も問題がないか確認
 //TODO 中断・再開が可能なよう実装
+//TODO 設定画面（難しくなければ やるとしても、ブランチを作る）
 
 package jp.co.teng.android.moguratataki;
-
-
-import java.util.Date;
-import java.util.Random;
 
 import jp.co.teng.android.moguratataki.DataLoader;
 import android.app.Activity;
@@ -31,7 +29,6 @@ import android.graphics.Paint;
 import android.graphics.PorterDuff.Mode;
 import android.graphics.Rect;
 import android.util.Log;
-import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceHolder.Callback;
@@ -47,7 +44,8 @@ Callback, Runnable{
 	private int status;
 	//	private final int StatusNOP           = 0;
 	private final int StatusInit          = 101; //内部状態の初期化中
-	private final int StatusPrepare       = 102; //画面の初期化中
+	private final int StatusSetting       = 102; //設定の初期化中
+	private final int StatusPrepare       = 103; //画面の初期化中
 	private final int StatusReady         = 201; //初期化完了状態
 	private final int StatusStarting      = 202; //次回開始待ち（カウントダウン中）
 	private final int StatusPlaying       = 203; //起動中
@@ -73,12 +71,13 @@ Callback, Runnable{
 	private final int sukima = 5;
 	private final int rows  = 4;
 	private final int cols  = 4;
-	private final Long mogLifespan = (long)3000;
-	private final Long mogDeadspan = (long)500;
+	private final Long mogLifespan = (long)1500;
+	private final Long mogDeadspan = (long)300;
 
 	private   Paint           textPaint;
 	private   int             textSize;
 	private   Paint           bgPaint;
+	private   Paint           retryPaint;
 	private   Paint           mogPaint;
 
 	protected Bitmap imageBase;
@@ -100,8 +99,17 @@ Callback, Runnable{
 	private int atPlayStart;
 	private int atPlayEnd;
 
+	private int score;
+
 	private SurfaceHolder   holder;
 	private Thread thread;
+
+	private final String MSG_RETRY = "ここを押してリトライ";
+	private int retryY;
+	private int retryX;
+	private int retryRectWidth;
+	private int retryRectHeight;
+
 
 
 	public GameView(Activity activity) {
@@ -114,7 +122,6 @@ Callback, Runnable{
 	 */
 	private void init() {
 
-		//TODO:デバッグコード
 		outputLog(LogD, "init");
 
 		holder = getHolder();
@@ -136,19 +143,19 @@ Callback, Runnable{
 
 	@Override
 	public void run() {
-		// TODO メインスレッド実装
 		while(thread != null){
-			//TODO:デバッグコード
-			//			outputLog(LogD, "main thread runnning");
 
 			switch(status){
 			case StatusInit:
 				//ゲーム開始準備（初回のみ）ブロック
-				prepareGame();
+				initBase();
+				break;
+			case StatusSetting:
+				//設定初期化ブロック
+				initPlaySetting();
 				break;
 			case StatusPrepare:
-				//TODO StatusPrepareはInit中にまとめて実施？？？
-				drowStartScreen();
+				preparePlay();
 				break;
 			case StatusReady:
 				//準備完了ブロック
@@ -193,33 +200,24 @@ Callback, Runnable{
 	//***** 初期化処理 ******************************************************************
 
 	/**
-	 * ゲーム開始準備処理
+	 * 初期化処理２（
 	 */
-	private void prepareGame(){
+	private void initBase(){
 		if(!surfaceCreated){
 			return;
 		}
 
-		//TODO prepareGameメソッド実装
 		loader.loadImages(getContext());
-		initGameParam();
+		initBasicParam();
 
-		mogPaint = new Paint();
-		mogPaint.setARGB(0xff,0,0,0);
-
-		moguraGp = new MoguraGroup(rows,cols);
-		moguraGp.setMogLifespan(mogLifespan);
-		moguraGp.setMogDeadspan(mogDeadspan);
-
-		status = StatusPrepare;
+		status = StatusSetting;
 		outputLog(LogD,"status change:" + status);
 	}
 
 	/**
-	 * 変数設定処理
+	 * 基本設定 変数初期化処理
 	 */
-	private void initGameParam(){
-		//TODO initGameParamメソッド実装 画面サイズを取得して画像パラメータの最適化 など
+	private void initBasicParam(){
 		textSize  = 28;
 		textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 		textPaint.setStyle(Paint.Style.FILL);
@@ -229,6 +227,10 @@ Callback, Runnable{
 		bgPaint = new Paint();
 		bgPaint.setStyle(Paint.Style.FILL);
 		bgPaint.setARGB(0xff,0,0,0); //背景色
+
+		retryPaint = new Paint();
+		retryPaint.setStyle(Paint.Style.FILL);
+		retryPaint.setARGB(0xff,50,50,50); //背景色
 
 		//描画時の座標計算のための倍率、画面の横幅から決める
 		if (getWidth() < 320) { // QVGA
@@ -268,18 +270,46 @@ Callback, Runnable{
 	//***** 起動中・汎用処理 ******************************************************************
 
 	/**
-	 * 開始画面表示処理
+	 * プレイ設定初期化処理
 	 */
-	private void drowStartScreen(){
-		//TODO drowStartScreenメソッド実装
+	private void initPlaySetting(){
+		mogPaint = new Paint();
+		mogPaint.setARGB(0xff,0,0,0);
+
+		moguraGp = new MoguraGroup(rows,cols);
+		moguraGp.setMogLifespan(mogLifespan);
+		moguraGp.setMogDeadspan(mogDeadspan);
+
+		//TODO 各種パラメータは現状ハードコーディング
+
+		Rect   bounds = new Rect();
+		textPaint.getTextBounds(MSG_RETRY,0,MSG_RETRY.length(),bounds);
+		retryX = (getWidth() - bounds.width()) / 2;
+		retryY = getHeight() - (textSize + 10);
+		retryRectWidth = retryX + bounds.width();
+		retryRectHeight = retryY + textSize + 10;
+
+		status = StatusPrepare;
+		outputLog(LogD,"status change:" + status);
+	}
+
+	/**
+	 * プレイ準備
+	 */
+	private void preparePlay(){
 		if (!surfaceCreated) {
 			return;
 		}
 
+		score = 0;
+		moguraGp.reflesh();
+
+		//開始メッセージ表示
 		Canvas canvas = null;
 		try{
 			synchronized (holder) {
 				canvas = holder.lockCanvas();
+				canvas.drawColor(0, Mode.CLEAR);
 				paintMessage(canvas,MSG_START_WAITING);
 			}
 		}catch(Exception e){
@@ -297,10 +327,8 @@ Callback, Runnable{
 	 * Clock開始処理（カウントダウンクロック・プレイクロックを連続して呼び出す）
 	 */
 	private void startClock(){
-		//TODO startCountDownメソッド実装
 
 		atPlayStart = 0;
-		//TODO タイマー処理詳細化
 		// 3秒カウントダウンする
 		new GameTimer(3000,1000){
 			//            TextView count_txt = (TextView)findViewById(R.id.textView1);
@@ -323,7 +351,6 @@ Callback, Runnable{
 	 * PlayClock開始処理
 	 */
 	private void startPlayClock(){
-		//TODO startPlayClockメソッド実装
 		Canvas canvas = null;
 		try{
 			synchronized (holder) {
@@ -339,7 +366,6 @@ Callback, Runnable{
 		}
 
 		atPlayEnd = 0;
-		//TODO タイマー処理詳細化
 		new GameTimer(10000,1000){
 			//            TextView count_txt = (TextView)findViewById(R.id.textView1);
 			// カウントダウン処理
@@ -359,7 +385,6 @@ Callback, Runnable{
 	 * PLAY終了処理
 	 */
 	private void exitPlaying(){
-		//TODO exitPlayingメソッド実装
 		//結果表示処理
 
 		status = StatusDisplayResult;
@@ -370,15 +395,19 @@ Callback, Runnable{
 	 * 結果・選択画面表示処理
 	 */
 	private void displayResult(){
-		//TODO displayResultメソッド実装
 		//結果表示処理
 
-		//TODO テストコード
+		//TODO repaintにまとめるか
 		Canvas canvas = null;
 		try{
 			synchronized (holder) {
 				canvas = holder.lockCanvas();
+				canvas.drawColor(0, Mode.CLEAR);
+				paintCells(canvas);
+				paintMoguras(canvas);
 				paintMessage(canvas,MSG_TIMEUP);
+				paintScore(canvas, score);
+				paintRetryMsg(canvas, MSG_RETRY);
 			}
 		}catch(Exception e){
 			outputLog(LogE, "message:", e);
@@ -396,7 +425,6 @@ Callback, Runnable{
 	 * 画面再描画処理
 	 */
 	private void repaint(){
-		//TODO repaintメソッド実装
 		Canvas canvas = null;
 		if(status == StatusStarting){
 			if(atPlayStart == 0){
@@ -405,6 +433,7 @@ Callback, Runnable{
 			try{
 				synchronized (holder) {
 					canvas = holder.lockCanvas();
+					canvas.drawColor(0, Mode.CLEAR);
 					paintCells(canvas);
 					paintMessage(canvas, MSG_START_COUNTDOWN + atPlayStart);
 				}
@@ -422,9 +451,11 @@ Callback, Runnable{
 			try{
 				synchronized (holder) {
 					canvas = holder.lockCanvas();
+					canvas.drawColor(0, Mode.CLEAR);
 					paintCells(canvas);
 					paintMoguras(canvas);
 					paintMessage(canvas, MSG_PLAYING + atPlayEnd);
+					paintScore(canvas, score);
 				}
 			}catch(Exception e){
 				outputLog(LogE, "message:", e);
@@ -436,23 +467,18 @@ Callback, Runnable{
 		}
 	}
 
+
 	/**
 	 * セルの表示
 	 * @param canvas 描画時に使われるCanvas
 	 * @param drawNumber 数字の駒も描く
 	 */
 	private void paintCells(Canvas canvas) {
-		//TODO セルの表示※出来れば背景（一度だけ表示）にしたい
-		//TODO あるいは、ここで初回以外はもぐら表示も行うか？
-		int n;
-
-		n  = 0;
 		for (int y=0; y < rows; y++) {
 			for (int x=0; x < cols; x++) {
 				int   xx = x * pWidth + x * sukima + xOff;
 				int   yy = y * pHeight + y * sukima + yOff;
 				canvas.drawBitmap(imageBase,xx,yy,null);
-				n++;
 			}
 		}
 	}
@@ -462,7 +488,6 @@ Callback, Runnable{
 	 * @param canvas 描画時に使われるCanvas
 	 */
 	private void paintMoguras(Canvas canvas) {
-		int i=0;
 		int x;
 		int y;
 		int xx;
@@ -470,7 +495,7 @@ Callback, Runnable{
 		int alpha;
 		long curmills = System.currentTimeMillis();
 		Mogura mog;
-		while((mog = moguraGp.getLiveMogura(i)) != null){
+		while((mog = moguraGp.getLiveMogura()) != null){
 			switch(mog.getStatus()){
 			case Mogura.MOG_ALLIVE:
 				x = mog.getCol();
@@ -493,8 +518,8 @@ Callback, Runnable{
 			default:
 				break;
 			}
-			i++;
 		}
+		moguraGp.refleshIndex();
 	}
 
 	/**
@@ -511,8 +536,39 @@ Callback, Runnable{
 		xx = (getWidth() - bounds.width()) / 2;
 		//		yy = (getHeight() - textSize) / 2;
 		yy = textSize;
-		canvas.drawRect(0, 0, getWidth(), textSize + 5, bgPaint);
+		canvas.drawRect(0, 0, getWidth(), yy + 5, bgPaint);
 		canvas.drawText(str,xx,yy,textPaint);
+	}
+
+	/**
+	 * スコア表示処理
+	 */
+	private void paintScore(Canvas canvas ,int score) {
+		int xx,yy;
+
+		String str = "スコア:" + score;
+
+		Rect   bounds = new Rect();
+		textPaint.getTextBounds(str,0,str.length(),bounds);
+		xx = (getWidth() - bounds.width()) / 2;
+		//		yy = (getHeight() - textSize) / 2;
+		yy = textSize * 2 + 10;
+		canvas.drawRect(0, textSize + 5, getWidth(), yy + 5, bgPaint);
+		canvas.drawText(str,xx,yy,textPaint);
+	}
+
+	/**
+	 * リトライメッセージ表示
+	 */
+	private void paintRetryMsg(Canvas canvas ,String message) {
+		String str;
+
+		str = message;
+
+//		retryX = (getWidth() - bounds.width()) / 2;
+//		retryY = getHeight() - (textSize + 10);
+		canvas.drawRect(retryX, retryY, retryRectWidth, retryRectHeight, retryPaint);
+		canvas.drawText(str,retryX,retryY + (textSize + 3),textPaint);
 	}
 
 	/**
@@ -547,8 +603,6 @@ Callback, Runnable{
 
 	@Override
 	public void surfaceChanged(SurfaceHolder arg0, int arg1, int arg2, int arg3) {
-		// TODO 自動生成されたメソッド・スタブ
-
 	}
 
 	@Override
@@ -561,7 +615,6 @@ Callback, Runnable{
 
 	@Override
 	public void surfaceDestroyed(SurfaceHolder arg0) {
-		// TODO 自動生成されたメソッド・スタブ
 		surfaceCreated = false;
 		//TODO スレッド解放処理はここでOK？
 		thread = null;
@@ -590,18 +643,24 @@ Callback, Runnable{
 			startClock();
 			return super.onTouchEvent(event);
 		}else if(status == StatusSelecting){
-			status = StatusPrepare;
-			outputLog(LogD,"status change:" + status);
+			//TODO 指定の領域をタッチしたかどうかの判断 もっとスマートなやり方があるはず
+			if(retryX <= event.getX() && event.getX() <= retryRectWidth &&
+					retryY <= event.getY() && event.getY() <= retryRectHeight){
+				status = StatusPrepare;
+				outputLog(LogD,"status change:" + status);
+				return super.onTouchEvent(event);
+			}
 			return super.onTouchEvent(event);
 		}else if(status == StatusPlaying){
-//			xx = x * pWidth + x * sukima + xOff;
-//			yy = y * pHeight + y * sukima + yOff;
-			int col = (int)Math.floor((event.getX() - xOff) / (pWidth + sukima));
-			int row = (int)Math.floor((event.getY() - yOff) / (pHeight + sukima));
+			//			xx = x * pWidth + x * sukima + xOff;
+			//			yy = y * pHeight + y * sukima + yOff;
+			int col = (int)((event.getX() - xOff) / (pWidth + sukima));
+			int row = (int)((event.getY() - yOff) / (pHeight + sukima));
 			outputLog(LogD, "[touched]" + " row:" + row + " col:" + col);
 			if(row < rows && col < cols && moguraGp.setMogAtacked(row, col)){
 				//Atackedに変更された場合
 				outputLog(LogD, "[touched][Atacked]" + " row:" + row + " col:" + col);
+				score++;
 				return super.onTouchEvent(event);
 			}
 			//Atackedに変更されなかった（ステータスがAliveじゃない）場合

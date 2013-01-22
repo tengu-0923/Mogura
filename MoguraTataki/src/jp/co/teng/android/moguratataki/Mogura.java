@@ -58,11 +58,15 @@ public class Mogura {
 		this.status = MOG_DEAD;
 	}
 
-	public void reset(long poppingMills) {
+	public void popup(long mogLifespan) {
 		this.status = MOG_ALLIVE;
-		//		this.popTime = popTime;
-		this.removeTime = System.currentTimeMillis() + poppingMills;
-		Log.d("Moguratataki", "[poped][reseted]" + " row:" + row + " col:" + col);
-
+		this.removeTime = System.currentTimeMillis() + mogLifespan;
+		Log.d("Moguratataki", "[poped]" + " row:" + row + " col:" + col);
 	}
+
+	public void reset() {
+		this.status = MOG_DEAD;
+		this.removeTime = 0;
+	}
+
 }
