@@ -7,7 +7,7 @@
 //→対象を指定したCanvasのクリア方法を明らかに ダブルバッファリングが鍵
 //済 画面調整・画面表示のブラッシュアップ
 //→背景は常に表示・もぐらは毎回再描画 SurfaceViewの仕様上、毎回再描画が必要
-//TODO もぐら表示の実装
+//TODO もぐら表示の実装　もぐら側に表示内容を返すメソッドを持たせる
 //TODO もぐらタッチの実装
 //TODO １）タッチイベントを拾って、得点を内部に保存
 //TODO ２）得点の表示・更新
@@ -19,6 +19,9 @@
 
 package jp.co.teng.android.moguratataki;
 
+
+import java.util.Date;
+import java.util.Random;
 
 import jp.co.teng.android.moguratataki.DataLoader;
 import android.app.Activity;
@@ -70,14 +73,17 @@ Callback, Runnable{
 	private final int sukima = 5;
 	private final int rows  = 4;
 	private final int cols  = 4;
-	private final Long mogLifespan = (long)2000;
+	private final Long mogLifespan = (long)3000;
+	private final Long mogDeadspan = (long)500;
 
 	private   Paint           textPaint;
 	private   int             textSize;
 	private   Paint           bgPaint;
+	private   Paint           mogPaint;
 
 	protected Bitmap imageBase;
 	protected Bitmap imageMogura;
+	protected Bitmap imageAtacked;
 	private   DataLoader      loader;
 
 	private   int             xOff;         // 駒表示時のXのオフセット
@@ -86,7 +92,8 @@ Callback, Runnable{
 	private   int             pHeight;      // 駒の高さ
 	private   float           scale;        // 座標計算用スケール
 
-	private Mogura[] moguras;
+	//	private Mogura[] moguras;
+	private MoguraGroup moguraGp;
 
 	private final String APP_NAME         = "Moguratataki";
 
@@ -95,6 +102,7 @@ Callback, Runnable{
 
 	private SurfaceHolder   holder;
 	private Thread thread;
+
 
 	public GameView(Activity activity) {
 		super(activity);
@@ -153,10 +161,10 @@ Callback, Runnable{
 				//				repaint();
 				break;
 			case StatusPlaying:
+				//もぐらポップアップ処理
+				moguraGp.popMoguraAtRandom();
 				//再描画処理
 				repaint();
-				//もぐらポップアップ処理
-				popMogura();
 				break;
 			case StatusTimeup:
 				//プレイ終了処理(終了時のみ)
@@ -196,10 +204,12 @@ Callback, Runnable{
 		loader.loadImages(getContext());
 		initGameParam();
 
-		moguras = new Mogura[rows*cols];
-		for (int i=0;i<rows*cols ;i++){
-			moguras[i] = new Mogura();
-		}
+		mogPaint = new Paint();
+		mogPaint.setARGB(0xff,0,0,0);
+
+		moguraGp = new MoguraGroup(rows,cols);
+		moguraGp.setMogLifespan(mogLifespan);
+		moguraGp.setMogDeadspan(mogDeadspan);
 
 		status = StatusPrepare;
 		outputLog(LogD,"status change:" + status);
@@ -330,7 +340,7 @@ Callback, Runnable{
 
 		atPlayEnd = 0;
 		//TODO タイマー処理詳細化
-		new GameTimer(5000,1000){
+		new GameTimer(10000,1000){
 			//            TextView count_txt = (TextView)findViewById(R.id.textView1);
 			// カウントダウン処理
 			public void onTick(long millisUntilFinished){
@@ -413,6 +423,7 @@ Callback, Runnable{
 				synchronized (holder) {
 					canvas = holder.lockCanvas();
 					paintCells(canvas);
+					paintMoguras(canvas);
 					paintMessage(canvas, MSG_PLAYING + atPlayEnd);
 				}
 			}catch(Exception e){
@@ -447,10 +458,43 @@ Callback, Runnable{
 	}
 
 	/**
-	 * もぐらポップアップ処理
+	 * モグの表示
+	 * @param canvas 描画時に使われるCanvas
 	 */
-	private void popMogura(){
-		//TODO popMoguraメソッド実装
+	private void paintMoguras(Canvas canvas) {
+		int i=0;
+		int x;
+		int y;
+		int xx;
+		int yy;
+		int alpha;
+		long curmills = System.currentTimeMillis();
+		Mogura mog;
+		while((mog = moguraGp.getLiveMogura(i)) != null){
+			switch(mog.getStatus()){
+			case Mogura.MOG_ALLIVE:
+				x = mog.getCol();
+				y = mog.getRow();
+				xx = x * pWidth + x * sukima + xOff;
+				yy = y * pHeight + y * sukima + yOff;
+				alpha = (int)(((double)(mog.getRemoveTime() - curmills) / (double)mogLifespan) * 255);
+				mogPaint.setAlpha(alpha);
+				canvas.drawBitmap(imageMogura,xx,yy,mogPaint);
+				break;
+			case Mogura.MOG_ATACKED:
+				x = mog.getCol();
+				y = mog.getRow();
+				xx = x * pWidth + x * sukima + xOff;
+				yy = y * pHeight + y * sukima + yOff;
+				alpha = (int)(((double)(mog.getRemoveTime() - curmills) / (double)mogDeadspan) * 255);
+				mogPaint.setAlpha(alpha);
+				canvas.drawBitmap(imageAtacked,xx,yy,mogPaint);
+				break;
+			default:
+				break;
+			}
+			i++;
+		}
 	}
 
 	/**
@@ -493,7 +537,8 @@ Callback, Runnable{
 			Log.d(APP_NAME,message);
 			break;
 		case LogE:
-			Log.d(APP_NAME,message + "message:" + e.getMessage());
+			Log.e(APP_NAME,message + "message:" + e.getMessage());
+			e.printStackTrace();
 			break;
 		}
 	}
@@ -547,6 +592,20 @@ Callback, Runnable{
 		}else if(status == StatusSelecting){
 			status = StatusPrepare;
 			outputLog(LogD,"status change:" + status);
+			return super.onTouchEvent(event);
+		}else if(status == StatusPlaying){
+//			xx = x * pWidth + x * sukima + xOff;
+//			yy = y * pHeight + y * sukima + yOff;
+			int col = (int)Math.floor((event.getX() - xOff) / (pWidth + sukima));
+			int row = (int)Math.floor((event.getY() - yOff) / (pHeight + sukima));
+			outputLog(LogD, "[touched]" + " row:" + row + " col:" + col);
+			if(row < rows && col < cols && moguraGp.setMogAtacked(row, col)){
+				//Atackedに変更された場合
+				outputLog(LogD, "[touched][Atacked]" + " row:" + row + " col:" + col);
+				return super.onTouchEvent(event);
+			}
+			//Atackedに変更されなかった（ステータスがAliveじゃない）場合
+			outputLog(LogD, "[touched][Unatacked]" + " row:" + row + " col:" + col);
 			return super.onTouchEvent(event);
 		}
 		return true;

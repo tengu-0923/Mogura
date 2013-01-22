@@ -14,6 +14,7 @@ public class DataLoader {
 
 	private final int imageIdBase = R.drawable.base;
 	private final int imageIdMogura = R.drawable.mogura;
+	private final int imageIdAtacked = R.drawable.atacked;
 
 	/**
 	 * DataLoaderクラスのコンストラクタ
@@ -31,17 +32,24 @@ public class DataLoader {
 	public boolean loadImages(Context context) {
 		Resources res = context.getResources();
 
-//		Bitmap b;
+		//		Bitmap b;
 		if ((game.imageBase =
 				BitmapFactory.decodeResource(res,imageIdBase)) == null) {
 			Log.e("Moguratataki","loadImages err:"+imageIdBase);
 			return false;
 		}
 
-//			Bitmap b;
+		//			Bitmap b;
 		if ((game.imageMogura =
 				BitmapFactory.decodeResource(res,imageIdMogura)) == null) {
 			Log.e("Moguratataki","loadImages err:"+imageIdMogura);
+			return false;
+		}
+
+		//		Bitmap b;
+		if ((game.imageAtacked =
+				BitmapFactory.decodeResource(res,imageIdAtacked)) == null) {
+			Log.e("Moguratataki","loadImages err:"+imageIdAtacked);
 			return false;
 		}
 
